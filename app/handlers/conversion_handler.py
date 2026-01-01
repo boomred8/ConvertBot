@@ -221,7 +221,47 @@ async def document_processing(message: types.Message,
         return
 
     elif convert_type == 'squeeze':
-        pass
+        if not message.document:
+            await message.answer("⚠️ Отправьте <b>PDF-файл</b>.", parse_mode="HTML")
+            return
+        is_pdf = (message.document.file_name or "").lower()
+        if not is_pdf.endswith(".pdf"):
+            await message.answer("⚠️ Нужен именно <b>.pdf</b> файл.", parse_mode="HTML")
+            return
+
+        file_name = message.document.file_name
+        file_id = message.document.file_id
+        tg_file = await bot.get_file(file_id)
+
+        input_path = input_dir / file_name
+        await bot.download_file(tg_file.file_path, destination=input_path)
+
+        output_path = output_dir / f"{Path(file_name).stem}_squeeze.pdf"
+
+        try:
+            squeeze_pdf(input_path, output_path)
+
+            # если вдруг стало больше — отправим оригинал
+            if output_path.exists() and output_path.stat().st_size >= input_path.stat().st_size:
+                send_path = input_path
+            else:
+                send_path = output_path
+
+            await message.answer_document(
+                FSInputFile(send_path),
+                caption="✅ Готово: PDF сжат"
+            )
+
+            await state.clear()
+            return
+
+        except Exception as e:
+            await message.answer(
+                f"❌ Не удалось сжать PDF.\n"
+                f"Причина: <code>{e}</code>",
+                parse_mode="HTML"
+            )
+            return
 
 
 @conversion_router.callback_query(F.data == "ready_to_combine",
