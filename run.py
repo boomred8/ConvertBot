@@ -20,7 +20,7 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+    #logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
     try:
         asyncio.run(main())

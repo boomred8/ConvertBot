@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 import app.keyboards.main_reply as main_reply
 import app.keyboards.conversion_markup as conversion_markup
 from app.conversion import combine_images_to_pdf, squeeze_pdf, doc_to_pdf, pdf_to_one
+import app.utils.cleanup as cleanup
 
 
 conversion_router = Router()
@@ -165,6 +166,8 @@ async def document_processing(message: types.Message,
         except Exception as e:
             await message.answer(f"❌ Не удалось конвертировать DOCX.\nПричина: <code>{e}</code>", parse_mode="HTML")
             return
+        finally:
+            cleanup.cleanup_user_files(user_id)
 
     elif convert_type == 'pdf_to_one':
         if not message.document:
@@ -294,6 +297,8 @@ async def document_processing(message: types.Message,
                 parse_mode="HTML"
             )
             return
+        finally:
+            cleanup.cleanup_user_files(user_id)
 
 @conversion_router.callback_query(F.data == "ready_to_combine",
                            ConversionStates.waiting_file)
@@ -322,6 +327,7 @@ async def ready_to_combine(callback: types.CallbackQuery,
     )
     await state.clear()
     await callback.answer()
+    cleanup.cleanup_user_files(user_id)
 
 
 @conversion_router.callback_query(F.data == "clear_combine", ConversionStates.waiting_file)
@@ -380,6 +386,7 @@ async def ready_to_merge(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=conversion_markup.inline_stop_convert_markup()
     )
     await state.clear()
+    cleanup.cleanup_user_files(user_id)
     await callback.answer()
 
 
@@ -402,6 +409,7 @@ async def clear_merge(callback: types.CallbackQuery, state: FSMContext):
             parse_mode="HTML",
             reply_markup=conversion_markup.inline_pdf_merge_markup()
         )
+
 
 @conversion_router.callback_query(F.data == "cancel_merge", ConversionStates.waiting_file)
 async def cancel_merge(callback: types.CallbackQuery, state: FSMContext):
