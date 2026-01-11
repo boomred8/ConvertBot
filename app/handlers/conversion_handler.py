@@ -16,6 +16,8 @@ conversion_router = Router()
 class ConversionStates(StatesGroup):
     waiting_file = State()
 
+MAX_IMAGES = 30
+MAX_PDF = 25
 
 @conversion_router.message(F.text == 'Конвертация 📦')
 async def choice_convert(message: types.Message,
@@ -192,7 +194,8 @@ async def document_processing(message: types.Message,
         text = (
             "📎 <b>Режим объединения PDF активен</b>\n\n"
             "Отправляйте PDF файлы.\n"
-            f"Добавлено: <b>{len(pdf_files)}</b>"
+            f"Добавлено: <b>{len(pdf_files)}</b> / <b>{MAX_PDF}</b>\n"
+            f"Порядок страниц = порядок отправки."
         )
 
         if panel_msg_id:
@@ -223,6 +226,15 @@ async def document_processing(message: types.Message,
         images = data.get("images", [])
         panel_msg_id = data.get("panel_msg_id")
 
+        if len(images) >= MAX_IMAGES:
+            await message.answer(
+                "⚠️ <b>Достигнут лимит</b>\n\n"
+                f"Максимум: <b>{MAX_IMAGES}</b> фото.\n"
+                "Нажмите <b>«Собрать PDF»</b> или <b>«Очистить»</b>.",
+                parse_mode="HTML",
+                reply_markup=conversion_markup.inline_combine_markup()
+            )
+            return
         photo = message.photo[-1]
         tg_file = await bot.get_file(photo.file_id)
 
@@ -232,6 +244,8 @@ async def document_processing(message: types.Message,
         images.append(str(input_path))
         await state.update_data(images=images)
 
+
+
         if panel_msg_id:
             await message.bot.edit_message_text(
                 chat_id=message.chat.id,
@@ -239,7 +253,8 @@ async def document_processing(message: types.Message,
                 text=(
                     "🗂 <b>Режим объединения активен</b>\n\n"
                     f"Отправляйте фотографии.\n"
-                    f"Добавлено: <b>{len(images)}</b>"
+                    f"Добавлено: <b>{len(images)}</b> / <b>{MAX_IMAGES}</b>\n"
+                    f"Порядок страниц = порядок отправки."
                 ),
                 parse_mode="HTML",
                 reply_markup=conversion_markup.inline_combine_markup()
@@ -248,7 +263,8 @@ async def document_processing(message: types.Message,
             panel = await message.answer(
                 "🗂 <b>Режим объединения активен</b>\n\n"
                 "Отправляйте фотографии.\n"
-                f"Добавлено: <b>{len(images)}</b>",
+                f"Добавлено: <b>{len(images)}</b> / <b>{MAX_IMAGES}</b>\n\n"
+                "Порядок страниц = порядок отправки.",
                 parse_mode="HTML",
                 reply_markup=conversion_markup.inline_combine_markup()
             )
@@ -309,6 +325,35 @@ async def ready_to_combine(callback: types.CallbackQuery,
 
     if not images:
         await callback.answer("Нет фотографий", show_alert=True)
+        return
+    if len(images) > MAX_IMAGES:
+        await state.update_data(images=[])
+
+        panel_msg_id = data.get("panel_msg_id")
+        if panel_msg_id:
+            try:
+                await callback.message.bot.edit_message_text(
+                    chat_id=callback.message.chat.id,
+                    message_id=panel_msg_id,
+                    text=(
+                        "🧩 <b>Фото → один PDF</b>\n\n"
+                        "Отправляйте Фотографии.\n"
+                        "Добавлено: <b>0</b>"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=conversion_markup.inline_combine_markup()
+                )
+            except Exception:
+                pass
+
+        await callback.message.answer(
+            "⚠️ <b>Слишком много фотографии</b>\n\n"
+            f"Максимум: <b>{MAX_IMAGES}</b> PDF.\n"
+            f"Я очистил список — отправь нужное количество заново ✅",
+            parse_mode="HTML",
+            reply_markup=conversion_markup.inline_combine_markup()
+        )
+        await callback.answer("Список очищен")
         return
 
     user_id = callback.from_user.id
@@ -371,6 +416,37 @@ async def ready_to_merge(callback: types.CallbackQuery, state: FSMContext):
     if not pdf_files:
         await callback.answer("Нет PDF файла", show_alert=True)
         return
+    if len(pdf_files) > MAX_PDF:
+        await state.update_data(pdf_files=[])
+
+        pdf_panel_msg_id = data.get("pdf_panel_msg_id")
+        if pdf_panel_msg_id:
+            try:
+                await callback.message.bot.edit_message_text(
+                    chat_id=callback.message.chat.id,
+                    message_id=pdf_panel_msg_id,
+                    text=(
+                        "🗂 <b>Режим объединения активен</b>\n\n"
+                        "Отправляйте PDF файл.\n"
+                        "Добавлено: <b>0</b>"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=conversion_markup.inline_pdf_merge_markup()
+                )
+            except Exception:
+                pass
+
+        await callback.message.answer(
+            "⚠️ <b>Слишком много файлов</b>\n\n"
+            f"Максимум: <b>{MAX_PDF}</b> PDF.\n"
+            f"Я очистил список — отправь нужное количество заново ✅",
+            parse_mode="HTML",
+            reply_markup=conversion_markup.inline_pdf_merge_markup()
+        )
+        await callback.answer("Список очищен")
+        return
+
+
     user_id = callback.from_user.id
     base_dir = Path('from_user') / str(user_id)
     output_dir = base_dir / 'output'
