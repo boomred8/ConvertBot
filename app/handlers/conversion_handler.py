@@ -9,6 +9,7 @@ import app.keyboards.main_reply as main_reply
 import app.keyboards.conversion_markup as conversion_markup
 from app.conversion import combine_images_to_pdf, squeeze_pdf, doc_to_pdf, pdf_to_one
 import app.utils.cleanup as cleanup
+import app.utils.human_mb as human_mb
 
 
 conversion_router = Router()
@@ -18,6 +19,16 @@ class ConversionStates(StatesGroup):
 
 MAX_IMAGES = 30
 MAX_PDF = 25
+
+MAX_DOC_MB = 20
+MAX_IMAGES_MB = 10
+MAX_PDF_MB = 25
+MAX_SQUEEZE_MB = 50
+
+MAX_DOC_BYTES = MAX_DOC_MB * 1024 * 1024
+MAX_IMAGES_BYTES = MAX_IMAGES_MB * 1024 * 1024
+MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024
+MAX_SQUEEZE_BYTES = MAX_SQUEEZE_MB * 1024 * 1024
 
 @conversion_router.message(F.text == 'Конвертация 📦')
 async def choice_convert(message: types.Message,
@@ -91,7 +102,7 @@ async def choose_photo_to_pdf(callback: types.CallbackQuery,
             "Отправляйте фотографии.\n"
             "Добавлено: <b>0</b>",
             parse_mode="HTML",
-            reply_markup=conversion_markup.inline_pdf_merge_markup()
+            reply_markup=conversion_markup.inline_combine_markup()
         )
         await state.update_data(panel_msg_id=pdf_panel.message_id)
 
@@ -154,6 +165,10 @@ async def document_processing(message: types.Message,
             return
 
         file_id = message.document.file_id
+        file_size = message.document.file_size or 0
+        if await human_mb.reject_if_too_big(message, file_size, MAX_DOC_BYTES):
+            return
+
         tg_file = await bot.get_file(file_id)
         input_path = input_dir / file_name
         await bot.download_file(tg_file.file_path, destination=input_path)
@@ -181,8 +196,23 @@ async def document_processing(message: types.Message,
             await message.answer("⚠️ Нужен именно <b>.pdf</b> файл.", parse_mode="HTML")
             return
 
+
+        file_size = message.document.file_size or 0
+
         pdf_files = data.get("pdf_files", [])
         panel_msg_id = data.get("pdf_panel_msg_id")
+
+        if len(pdf_files) >= MAX_PDF:
+            await message.answer(
+                f"⚠️ Максимум: <b>{MAX_PDF}</b> PDF.\n"
+                "Нажмите «Собрать» или «Очистить».",
+                parse_mode="HTML",
+                reply_markup=conversion_markup.inline_pdf_merge_markup()
+            )
+            return
+
+        if await human_mb.reject_if_too_big(message, file_size, MAX_PDF_BYTES):
+            return
 
         tg_file = await bot.get_file(message.document.file_id)
         input_path = input_dir / f"pdf_{message.message_id}.pdf"
@@ -236,6 +266,11 @@ async def document_processing(message: types.Message,
             )
             return
         photo = message.photo[-1]
+        file_size = photo.file_size or 0
+
+        if await human_mb.reject_if_too_big(message, file_size, MAX_IMAGES_BYTES):
+            return
+
         tg_file = await bot.get_file(photo.file_id)
 
         input_path = input_dir / f"combine_{message.message_id}.jpg"
@@ -282,6 +317,11 @@ async def document_processing(message: types.Message,
 
         file_name = message.document.file_name
         file_id = message.document.file_id
+        file_size = message.document.file_size or 0
+
+        if await human_mb.reject_if_too_big(message, file_size, MAX_SQUEEZE_BYTES):
+            return
+
         tg_file = await bot.get_file(file_id)
 
         input_path = input_dir / file_name
@@ -348,7 +388,7 @@ async def ready_to_combine(callback: types.CallbackQuery,
 
         await callback.message.answer(
             "⚠️ <b>Слишком много фотографии</b>\n\n"
-            f"Максимум: <b>{MAX_IMAGES}</b> PDF.\n"
+            f"Максимум: <b>{MAX_IMAGES}</b> фото.\n"
             f"Я очистил список — отправь нужное количество заново ✅",
             parse_mode="HTML",
             reply_markup=conversion_markup.inline_combine_markup()
