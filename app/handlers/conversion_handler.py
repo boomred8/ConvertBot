@@ -10,6 +10,7 @@ import app.keyboards.conversion_markup as conversion_markup
 from app.conversion import combine_images_to_pdf, squeeze_pdf, doc_to_pdf, pdf_to_one
 import app.utils.cleanup as cleanup
 import app.utils.human_mb as human_mb
+import app.utils.time_delete as time_delete
 
 
 conversion_router = Router()
@@ -29,6 +30,8 @@ MAX_DOC_BYTES = MAX_DOC_MB * 1024 * 1024
 MAX_IMAGES_BYTES = MAX_IMAGES_MB * 1024 * 1024
 MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024
 MAX_SQUEEZE_BYTES = MAX_SQUEEZE_MB * 1024 * 1024
+
+SESSION_TTL = 15 * 60
 
 @conversion_router.message(F.text == 'Конвертация 📦')
 async def choice_convert(message: types.Message,
@@ -53,6 +56,7 @@ async def back_to_menu(callback: types.CallbackQuery,
                                   parse_mode="HTML",
                                   reply_markup=main_reply.main_keyboard())
     await state.clear()
+    cleanup.cleanup_user_files(user_id=callback.from_user.id)
 
 
 @conversion_router.callback_query(F.data == 'docx_to_pdf',
@@ -133,6 +137,7 @@ async def stop_to_convert(callback: types.CallbackQuery,
                                   "Можете выбрать другое действие 👇",
                                   parse_mode="HTML",
                                   reply_markup=main_reply.main_keyboard())
+    cleanup.cleanup_user_files(user_id=callback.from_user.id)
 
 
 
@@ -245,6 +250,17 @@ async def document_processing(message: types.Message,
             await state.update_data(pdf_panel_msg_id=panel.message_id)
 
         return
+    ok = await time_delete.ensure_session_alive(
+        state=state,
+        user_id=message.from_user.id,
+        message=message,
+        ttl_seconds=SESSION_TTL,
+        cleanup_func=cleanup.cleanup_user_files,
+        reply_markup=conversion_markup.inline_pdf_merge_markup(),
+        mode_name="объединение PDF"
+    )
+    if not ok:
+        return
 
     elif convert_type == 'combine':
         if not message.photo:
@@ -305,6 +321,17 @@ async def document_processing(message: types.Message,
             )
             await state.update_data(panel_msg_id=panel.message_id)
 
+        return
+    ok = await time_delete.ensure_session_alive(
+        state=state,
+        user_id=message.from_user.id,
+        message=message,
+        ttl_seconds=SESSION_TTL,
+        cleanup_func=cleanup.cleanup_user_files,
+        reply_markup=conversion_markup.inline_combine_markup(),
+        mode_name="объединение фото в PDF"
+    )
+    if not ok:
         return
     elif convert_type == 'squeeze':
         if not message.document:
@@ -386,6 +413,7 @@ async def ready_to_combine(callback: types.CallbackQuery,
             except Exception:
                 pass
 
+
         await callback.message.answer(
             "⚠️ <b>Слишком много фотографии</b>\n\n"
             f"Максимум: <b>{MAX_IMAGES}</b> фото.\n"
@@ -447,11 +475,13 @@ async def cancel_combine(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML",
         reply_markup=main_reply.main_keyboard()
     )
+    cleanup.cleanup_user_files(user_id=callback.from_user.id)
 
 @conversion_router.callback_query(F.data == "ready_to_merge", ConversionStates.waiting_file)
 async def ready_to_merge(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     pdf_files = data.get("pdf_files", [])
+    user_id = callback.from_user.id
 
     if not pdf_files:
         await callback.answer("Нет PDF файла", show_alert=True)
@@ -475,6 +505,8 @@ async def ready_to_merge(callback: types.CallbackQuery, state: FSMContext):
                 )
             except Exception:
                 pass
+            finally:
+                cleanup.cleanup_user_files(user_id)
 
         await callback.message.answer(
             "⚠️ <b>Слишком много файлов</b>\n\n"
@@ -486,8 +518,6 @@ async def ready_to_merge(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Список очищен")
         return
 
-
-    user_id = callback.from_user.id
     base_dir = Path('from_user') / str(user_id)
     output_dir = base_dir / 'output'
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -538,3 +568,4 @@ async def cancel_merge(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML",
         reply_markup=main_reply.main_keyboard()
     )
+    cleanup.cleanup_user_files(user_id=callback.from_user.id)
